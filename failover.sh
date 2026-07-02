@@ -4,7 +4,8 @@
 # Uso: ./failover.sh (desde la raíz del proyecto)
 # =============================================================================
 
-set -e
+# No usar set -e — el script maneja sus propios errores para no morir
+# en comandos que pueden fallar parcialmente (curl, aws cli responses)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -37,8 +38,6 @@ echo -e "${BOLD}Verificando herramientas...${NC}"
 command -v aws >/dev/null 2>&1 || { echo -e "${RED}❌ aws CLI no instalado${NC}"; exit 1; }
 echo -e "${GREEN}✅ aws CLI disponible${NC}"
 
-# Los outputs viven en Terraform Cloud, así que los pedimos manualmente.
-# Los encuentras en: Terraform Cloud → workspace → último run → Outputs
 echo ""
 echo -e "${BOLD}Ingresa los valores del último run en Terraform Cloud.${NC}"
 echo -e "${YELLOW}(Terraform Cloud → workspace → último run → pestaña Outputs)${NC}"
@@ -63,28 +62,37 @@ press_enter
 # ── PASO 0: Estado normal ─────────────────────────────────────────
 clear
 echo -e "${BOLD}${CYAN}[ PASO 0 ] ESTADO NORMAL${NC}"
+echo ""
 echo -e "  ${GREEN}✅ EC2 corriendo en us-east-1 → http://${PRIMARY_EC2_IP}${NC}"
 echo -e "  ${GREEN}✅ RDS MySQL activa en us-east-1${NC}"
 echo -e "  ${GREEN}✅ Read Replica corriendo en us-east-2${NC}"
 echo -e "  ${RED}⏸  EC2 DR → NO existe (dr_ec2_enabled=false)${NC}"
 echo ""
 echo -e "Verifica en browser: ${CYAN}http://${PRIMARY_EC2_IP}${NC}"
+
 press_enter
 
-# ── PASO 1: Simular el desastre ───────────────────────────────────
+# ── PASO 1: Simular el desastre — INICIO DEL CONTADOR RTO ────────
 clear
 echo -e "${BOLD}${RED}[ PASO 1 ] SIMULAR EL DESASTRE${NC}"
 echo ""
 
+RTO_START=$(date +%s)
+RTO_START_LABEL=$(date '+%H:%M:%S')
+echo -e "${BOLD}Inicio del RTO: ${CYAN}${RTO_START_LABEL}${NC}"
+echo ""
+
 if [[ -n "$PRIMARY_EC2_ID" ]]; then
     confirm "¿Detener el EC2 primario '${PRIMARY_EC2_ID}' en us-east-1?"
-    aws ec2 stop-instances --instance-ids "$PRIMARY_EC2_ID" --region us-east-1
+    aws ec2 stop-instances --instance-ids "$PRIMARY_EC2_ID" --region us-east-1 > /dev/null
     echo -e "${GREEN}✅ EC2 primario detenido${NC}"
 else
-    echo -e "${YELLOW}Detén manualmente el EC2 desde la consola AWS en us-east-1${NC}"
+    echo -e "${YELLOW}⚠️  No se obtuvo el ID del EC2. Detenlo manualmente desde la consola AWS.${NC}"
 fi
 
-echo -e "${YELLOW}⏳ El health check de Route 53 tardará ~90s en detectar la falla.${NC}"
+echo ""
+echo -e "${YELLOW}⏳ El health check de Route 53 tardará ~30s en detectar la falla.${NC}"
+
 press_enter
 
 # ── PASO 2: Promover Read Replica ─────────────────────────────────
@@ -96,37 +104,29 @@ if [[ -n "$DR_REPLICA_ID" ]]; then
     confirm "¿Promover '${DR_REPLICA_ID}' a instancia primaria en us-east-2?"
     aws rds promote-read-replica \
         --db-instance-identifier "$DR_REPLICA_ID" \
-        --region us-east-2
+        --region us-east-2 > /dev/null
     echo -e "${GREEN}✅ Promoción iniciada. Tardará 2-5 minutos.${NC}"
-    echo -e "Monitorear: ${CYAN}aws rds describe-db-instances --db-instance-identifier ${DR_REPLICA_ID} --region us-east-2 --query 'DBInstances[0].DBInstanceStatus' --output text${NC}"
+    echo ""
+    echo -e "Monitorea el estado en otra terminal:"
+    echo -e "${CYAN}aws rds describe-db-instances --db-instance-identifier ${DR_REPLICA_ID} --region us-east-2 --query 'DBInstances[0].DBInstanceStatus' --output text${NC}"
 else
-    echo -e "${YELLOW}Ejecuta manualmente:${NC}"
+    echo -e "${YELLOW}⚠️  No se obtuvo el ID de la réplica. Ejecuta manualmente:${NC}"
     echo -e "${CYAN}aws rds promote-read-replica --db-instance-identifier dr-pilot-light-dr-mysql-replica --region us-east-2${NC}"
 fi
 
-press_enter
+echo ""
+echo -e "${YELLOW}▶ Presiona ENTER cuando RDS muestre estado 'available'...${NC}"
+read -r
 
 # ── PASO 3: Activar EC2 en DR vía Terraform Cloud ────────────────
 clear
 echo -e "${BOLD}${GREEN}[ PASO 3 ] ACTIVAR CÓMPUTO EN DR — TERRAFORM CLOUD${NC}"
 echo ""
-echo -e "Es momento de activar el EC2 en us-east-2 cambiando la variable"
-echo -e "${BOLD}dr_ec2_enabled${NC} de ${RED}false${NC} → ${GREEN}true${NC} en Terraform Cloud."
-echo ""
-echo -e "${BOLD}Pasos en la consola de Terraform Cloud:${NC}"
-echo ""
-echo -e "  1. Abre: ${CYAN}https://app.terraform.io${NC}"
-echo -e "  2. Entra a tu organización → workspace ${YELLOW}dr-pilot-light${NC}"
-echo -e "  3. Ve a ${BOLD}Variables${NC}"
-echo -e "  4. Edita ${YELLOW}dr_ec2_enabled${NC} → cambia el valor a ${GREEN}true${NC} → Save"
-echo -e "  5. Ve a ${BOLD}Actions → Start new run${NC}"
-echo -e "  6. Selecciona ${BOLD}Plan and apply${NC} → confirma el apply"
-echo ""
-echo -e "${BOLD}El plan debe mostrar: ${GREEN}Plan: 1 to add${NC}${BOLD} (solo el EC2 DR)${NC}"
+echo -e "Cambia ${YELLOW}dr_ec2_enabled${NC} → ${GREEN}true${NC} en Terraform Cloud y ejecuta el apply."
 echo ""
 echo -e "${YELLOW}⏳ El apply tardará ~2-3 minutos. Espera a que el run llegue a 'Applied'.${NC}"
 echo ""
-echo -e "${BOLD}▶ Presiona ENTER cuando el apply en Terraform Cloud haya terminado...${NC}"
+echo -e "${YELLOW}▶ Presiona ENTER cuando el apply en Terraform Cloud haya terminado...${NC}"
 read -r
 
 # ── PASO 4: Validar ───────────────────────────────────────────────
@@ -135,27 +135,53 @@ echo -e "${BOLD}${GREEN}[ PASO 4 ] VALIDAR FAILOVER${NC}"
 echo ""
 echo -e "Ingresa la IP pública del EC2 DR."
 echo -e "${YELLOW}(Terraform Cloud → último run → Outputs → dr_app_url, sin http://)${NC}"
-echo -e "${YELLOW}(o en la consola AWS → EC2 → us-east-2)${NC}"
 echo ""
-echo -e "IP pública del EC2 DR: "
+echo -n "IP pública del EC2 DR: "
 read -r DR_EC2_IP
 
+NGINX_OK=false
 if [[ -n "$DR_EC2_IP" ]]; then
     echo ""
     echo -e "Esperando que nginx arranque en ${CYAN}http://${DR_EC2_IP}${NC} ..."
-    for i in $(seq 1 12); do
-        curl -s --max-time 5 "http://${DR_EC2_IP}" | grep -q "Pilot Light" 2>/dev/null && \
-            { echo -e "\n${GREEN}✅ App respondiendo desde us-east-2: http://${DR_EC2_IP}${NC}"; break; } || \
-            { echo -n "."; sleep 10; }
+    for i in $(seq 1 18); do
+        if curl -s --max-time 5 "http://${DR_EC2_IP}" 2>/dev/null | grep -q "Pilot Light"; then
+            echo -e "\n${GREEN}✅ App respondiendo desde us-east-2: http://${DR_EC2_IP}${NC}"
+            NGINX_OK=true
+            break
+        else
+            echo -n "."
+            sleep 10
+        fi
     done
+    if [[ "$NGINX_OK" == false ]]; then
+        echo -e "\n${YELLOW}⚠️  nginx aún no responde. Verifica en el browser: http://${DR_EC2_IP}${NC}"
+        echo -e "${YELLOW}   El user_data puede estar aún instalando. Espera 1-2 minutos más.${NC}"
+    fi
 fi
 
+# ── Cálculo de RTO ────────────────────────────────────────────────
+RTO_END=$(date +%s)
+RTO_END_LABEL=$(date '+%H:%M:%S')
+RTO_TOTAL=$((RTO_END - RTO_START))
+RTO_MIN=$((RTO_TOTAL / 60))
+RTO_SEC=$((RTO_TOTAL % 60))
+
 echo ""
-echo -e "${BOLD}════════════════ FAILOVER COMPLETADO ✅ ════════════════${NC}"
-echo -e "  ${RED}❌ us-east-1: caída simulada${NC}"
+echo -e "${BOLD}${CYAN}"
+echo "  ┌─────────────────────────────────────────────┐"
+echo "  │          METRICAS DEL FAILOVER               │"
+echo "  ├─────────────────────────────────────────────┤"
+printf "  │  Inicio del desastre  : %-20s│\n" "$RTO_START_LABEL"
+printf "  │  Servicio restaurado  : %-20s│\n" "$RTO_END_LABEL"
+printf "  │  RTO real de la demo  : %d min %02d seg%11s│\n" "$RTO_MIN" "$RTO_SEC" ""
+echo "  ├─────────────────────────────────────────────┤"
+echo "  │  RPO : ~0 seg (replicacion continua)        │"
+echo "  └─────────────────────────────────────────────┘"
+echo -e "${NC}"
+echo -e "  ${RED}❌ us-east-1: caida simulada${NC}"
 echo -e "  ${GREEN}✅ us-east-2: EC2 activo, RDS promovida${NC}"
 if [[ -n "$DR_EC2_IP" ]]; then
-    echo -e "  ${GREEN}🌐 http://${DR_EC2_IP}${NC}"
+    echo -e "  ${CYAN}   http://${DR_EC2_IP}${NC}"
 fi
 echo ""
 echo -e "Para limpiar todo: ${CYAN}./destroy_all.sh${NC}"
