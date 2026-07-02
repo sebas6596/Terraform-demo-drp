@@ -34,17 +34,29 @@ echo -e "${NC}"
 
 # ── Verificación previa ───────────────────────────────────────────
 echo -e "${BOLD}Verificando herramientas...${NC}"
-command -v terraform >/dev/null 2>&1 || { echo -e "${RED}❌ terraform no instalado${NC}"; exit 1; }
-command -v aws       >/dev/null 2>&1 || { echo -e "${RED}❌ aws CLI no instalado${NC}"; exit 1; }
+command -v aws >/dev/null 2>&1 || { echo -e "${RED}❌ aws CLI no instalado${NC}"; exit 1; }
+echo -e "${GREEN}✅ aws CLI disponible${NC}"
 
-PRIMARY_EC2_IP=$(terraform output -raw primary_app_url 2>/dev/null | sed 's|http://||' || echo "")
-DR_REPLICA_ID=$(terraform output -raw dr_rds_replica_id 2>/dev/null || echo "")
-PRIMARY_EC2_ID=$(terraform output -raw primary_ec2_id 2>/dev/null || echo "")
+# Los outputs viven en Terraform Cloud, así que los pedimos manualmente.
+# Los encuentras en: Terraform Cloud → workspace → último run → Outputs
+echo ""
+echo -e "${BOLD}Ingresa los valores del último run en Terraform Cloud.${NC}"
+echo -e "${YELLOW}(Terraform Cloud → workspace → último run → pestaña Outputs)${NC}"
+echo ""
 
-[[ -z "$PRIMARY_EC2_IP" ]] && { echo -e "${RED}❌ No hay outputs de Terraform. Ejecuta terraform apply primero.${NC}"; exit 1; }
+echo -e "IP pública del EC2 Primary (primary_app_url, sin http://): "
+read -r PRIMARY_EC2_IP
 
-echo -e "${GREEN}✅ EC2 Primary IP : ${PRIMARY_EC2_IP}${NC}"
-echo -e "${GREEN}✅ RDS Replica ID : ${DR_REPLICA_ID}${NC}"
+echo -e "ID del EC2 Primary (primary_ec2_id, ej: i-0abc123): "
+read -r PRIMARY_EC2_ID
+
+echo -e "ID de la RDS Replica (dr_rds_replica_id, ej: dr-pilot-light-dr-mysql-replica): "
+read -r DR_REPLICA_ID
+
+echo ""
+echo -e "${GREEN}✅ EC2 Primary IP  : ${PRIMARY_EC2_IP}${NC}"
+echo -e "${GREEN}✅ EC2 Primary ID  : ${PRIMARY_EC2_ID}${NC}"
+echo -e "${GREEN}✅ RDS Replica ID  : ${DR_REPLICA_ID}${NC}"
 
 press_enter
 
@@ -119,10 +131,11 @@ read -r
 clear
 echo -e "${BOLD}${GREEN}[ PASO 4 ] VALIDAR FAILOVER${NC}"
 echo ""
-echo -e "Ingresa la IP pública del EC2 DR (la encuentras en los outputs"
-echo -e "del run de Terraform Cloud, o en EC2 → us-east-2 en la consola AWS):"
+echo -e "Ingresa la IP pública del EC2 DR."
+echo -e "${YELLOW}(Terraform Cloud → último run → Outputs → dr_app_url, sin http://)${NC}"
+echo -e "${YELLOW}(o en la consola AWS → EC2 → us-east-2)${NC}"
 echo ""
-echo -e "${YELLOW}IP pública del EC2 DR: ${NC}"
+echo -e "IP pública del EC2 DR: "
 read -r DR_EC2_IP
 
 if [[ -n "$DR_EC2_IP" ]]; then
