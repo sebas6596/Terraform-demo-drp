@@ -67,5 +67,12 @@ resource "aws_db_instance" "dr_replica" {
   deletion_protection = false
   skip_final_snapshot = true
 
+  # ignore_changes en replicate_source_db: cuando el script promueve la réplica
+  # via AWS CLI, el vínculo de replicación se rompe. Sin esto, el siguiente
+  # terraform apply falla porque Terraform detecta que la fuente ya no existe.
+  lifecycle {
+    ignore_changes = [replicate_source_db]
+  }
+
   tags = { Name = "${var.project_name}-dr-mysql-replica", Environment = "dr", Role = "read-replica" }
 }

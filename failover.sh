@@ -122,6 +122,8 @@ echo -e "  4. Edita ${YELLOW}dr_ec2_enabled${NC} → cambia el valor a ${GREEN}t
 echo -e "  5. Ve a ${BOLD}Actions → Start new run${NC}"
 echo -e "  6. Selecciona ${BOLD}Plan and apply${NC} → confirma el apply"
 echo ""
+echo -e "${BOLD}El plan debe mostrar: ${GREEN}Plan: 1 to add${NC}${BOLD} (solo el EC2 DR)${NC}"
+echo ""
 echo -e "${YELLOW}⏳ El apply tardará ~2-3 minutos. Espera a que el run llegue a 'Applied'.${NC}"
 echo ""
 echo -e "${BOLD}▶ Presiona ENTER cuando el apply en Terraform Cloud haya terminado...${NC}"
