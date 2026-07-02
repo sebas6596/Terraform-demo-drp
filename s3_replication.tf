@@ -47,8 +47,9 @@ resource "aws_iam_role_policy" "s3_replication" {
 
 # --- Bucket origen (us-east-1) ---
 resource "aws_s3_bucket" "primary" {
-  bucket = var.s3_primary_bucket_name
-  tags   = { Name = "${var.project_name}-primary-bucket", Role = "source" }
+  bucket        = var.s3_primary_bucket_name
+  force_destroy = true  # Permite destruir aunque tenga objetos y versiones
+  tags          = { Name = "${var.project_name}-primary-bucket", Role = "source" }
 }
 
 resource "aws_s3_bucket_versioning" "primary" {
@@ -58,9 +59,10 @@ resource "aws_s3_bucket_versioning" "primary" {
 
 # --- Bucket destino (us-east-2) ---
 resource "aws_s3_bucket" "dr_replica" {
-  provider = aws.dr
-  bucket   = var.s3_replica_bucket_name
-  tags     = { Name = "${var.project_name}-dr-bucket", Role = "replica" }
+  provider      = aws.dr
+  bucket        = var.s3_replica_bucket_name
+  force_destroy = true  # Permite destruir aunque tenga objetos replicados y versiones
+  tags          = { Name = "${var.project_name}-dr-bucket", Role = "replica" }
 }
 
 resource "aws_s3_bucket_versioning" "dr_replica" {
